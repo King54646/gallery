@@ -16,110 +16,111 @@
 <body>
 <canvas id="c"></canvas>
 <script>
-// Red "digital rain". Deterministic (seeded) so frames can be captured
-// identically: open with ?render to drive it via window.renderFrame().
+// Red "digital rain" as a pure function of the frame number: every stream's
+// position and every glyph repeats exactly after LOOP frames, so the
+// animation (and the rendered video) loops with no seam.
+// Open with ?render to drive it via window.renderFrame(t).
 (() => {
   const params = new URLSearchParams(location.search);
   const COLS = Number(params.get('cols')) || 30;      // columns across the screen
   const FPS = 30;
+  const LOOP = 8 * FPS;                               // loop length in frames
+  const SEED = Number(params.get('seed')) || 1999;
   const GLYPHS = 'ｦｱｳｴｵｶｷｹｺｻｼｽｾｿﾀﾂﾃﾅﾆﾇﾈﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾗﾘﾜ012345789Z:・.=*+-<>¦｜';
+  // Glyph swap intervals must divide LOOP so glyphs repeat with the loop.
+  const SWAPS = [6, 8, 10, 12, 16, 20, 24, 30, 40, 48, 60, 80, 120, 240];
 
-  let seed = Number(params.get('seed')) || 1999;
-  const rand = () => {                                // mulberry32
-    seed = (seed + 0x6D2B79F5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  const hash = (...n) => {                            // integers -> [0, 1)
+    let h = SEED ^ 0x9E3779B9;
+    for (const v of n) { h = Math.imul(h ^ v, 0x85EBCA6B); h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35); h ^= h >>> 16; }
+    return (h >>> 0) / 4294967296;
   };
-  const glyph = () => GLYPHS[(rand() * GLYPHS.length) | 0];
 
-  // The simulation draws into an offscreen buffer (trails accumulate there);
-  // each frame is copied to the screen with a vignette on top.
-  const buf = document.createElement('canvas');
-  const ctx = buf.getContext('2d', { alpha: false, willReadFrequently: true });
-  const screen = document.getElementById('c');
-  const sctx = screen.getContext('2d', { alpha: false });
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
   let W, H, size, rows, drops, vig;
 
-  const newDrop = (col, spread) => ({
-    col,
-    y: -rand() * rows * spread,
-    speed: 0.25 + rand() * 0.55,                      // cells per frame
-    layer: rand() < 0.3 ? 0.55 : 1,                   // dimmer "far" drops add depth
-    last: -1,
-  });
-
   function setup(w, h) {
-    W = buf.width = screen.width = w;
-    H = buf.height = screen.height = h;
+    W = canvas.width = w;
+    H = canvas.height = h;
     size = Math.ceil(W / COLS);
     rows = Math.ceil(H / size) + 1;
     drops = [];
     for (let c = 0; c < COLS; c++) {
-      drops.push(newDrop(c, 1.2));
-      if (rand() < 0.35) drops.push(newDrop(c, 1.2)); // some columns carry two streams
+      const streams = hash(c, 1) < 0.4 ? 2 : 1;       // some columns carry two streams
+      for (let s = 0; s < streams; s++) {
+        const trail = 10 + Math.floor(hash(c, s, 2) * 22);
+        // Cycle length in cells (an integer) and laps per loop (an integer)
+        // make the stream land back where it started after LOOP frames.
+        const cycle = rows + trail + Math.floor(hash(c, s, 3) * rows * 0.7);
+        const laps = hash(c, s, 4) < 0.25 ? 2 : 1;
+        drops.push({
+          col: c, trail, cycle,
+          speed: laps * cycle / LOOP,
+          phase: hash(c, s, 5) * cycle,
+          far: hash(c, s, 6) < 0.3,                   // dimmer "far" streams add depth
+        });
+      }
     }
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.font = `${Math.round(size * 0.9)}px "IPAGothic", "Hiragino Sans", "MS Gothic", monospace`;
-    vig = sctx.createRadialGradient(W / 2, H / 2, H * 0.22, W / 2, H / 2, H * 0.72);
+    vig = ctx.createRadialGradient(W / 2, H / 2, H * 0.22, W / 2, H / 2, H * 0.72);
     vig.addColorStop(0, 'rgba(0,0,0,0)');
     vig.addColorStop(1, 'rgba(0,0,0,0.6)');
-    for (let i = 0; i < 240; i++) step();             // pre-roll so the screen starts full
   }
 
-  function cell(col, row, color, blur) {
-    const y = row * size;
+  function glyph(col, row, t) {
+    const every = SWAPS[Math.floor(hash(col, row, 7) * SWAPS.length)];
+    const off = Math.floor(hash(col, row, 8) * every);
+    const k = Math.floor((t + off) / every) % (LOOP / every);
+    return GLYPHS[Math.floor(hash(col, row, 9, k) * GLYPHS.length)];
+  }
+
+  function render(frame) {
+    const t = ((frame % LOOP) + LOOP) % LOOP;
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#000';
-    ctx.fillRect(col * size, y, size, size);
-    ctx.shadowColor = color;
-    ctx.shadowBlur = blur;
-    ctx.fillStyle = color;
-    ctx.fillText(glyph(), col * size + size / 2, y);
-  }
-
-  function step() {
-    // Fade everything a little: this is what leaves the glowing trails.
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(0,0,0,0.075)';
     ctx.fillRect(0, 0, W, H);
 
-    // Glyphs flicker and swap inside existing trails.
-    for (let i = 0; i < COLS * 0.6; i++) {
-      const col = (rand() * COLS) | 0, row = (rand() * rows) | 0;
-      const r = ctx.getImageData(col * size + size / 2, row * size + size / 2, 1, 1).data[0];
-      if (r > 40) cell(col, row, `rgb(${Math.min(255, r + 40)},0,${r >> 3})`, 0);
-    }
-
     for (const d of drops) {
-      d.y += d.speed;
-      const row = Math.floor(d.y);
-      if (row !== d.last && row >= 0) {
-        // Previous head cools to red; the new head is a hot pinkish white.
-        if (d.last >= 0) cell(d.col, d.last, d.layer < 1 ? '#8a0010' : '#ff1a2e', size * 0.35 * d.layer);
-        cell(d.col, row, d.layer < 1 ? '#ff5a6a' : '#ffe2e6', size * 0.9 * d.layer);
-        d.last = row;
+      const head = Math.floor((d.phase + t * d.speed) % d.cycle) - d.trail;
+      const dim = d.far ? 0.5 : 1;
+      for (let i = d.trail - 1; i >= 0; i--) {         // tail first, head on top
+        const row = head - i;
+        if (row < 0 || row >= rows) continue;
+        const x = d.col * size + size / 2, y = row * size;
+        // Per-cell shimmer that also repeats with the loop.
+        const flick = 0.85 + 0.15 * hash(d.col, row, 10, Math.floor(t / 3) % (LOOP / 3));
+        let color, blur = 0;
+        if (i === 0) {
+          color = d.far ? '#ff6070' : '#ffe6ea';
+          blur = size * 0.9 * dim;
+        } else {
+          const f = Math.pow(1 - i / d.trail, 1.4) * dim * flick;
+          const g = i === 1 ? 70 * dim : 0;           // hot orange-red just behind the head
+          color = `rgb(${Math.round(255 * Math.min(1, f + 0.15))},${Math.round(g * f)},${Math.round(40 * f)})`;
+          if (i < 4) blur = size * 0.4 * dim;
+        }
+        ctx.shadowColor = color;
+        ctx.shadowBlur = blur;
+        ctx.fillStyle = color;
+        ctx.fillText(glyph(d.col, row, t), x, y);
       }
-      if (d.y > rows + rand() * rows * 0.5) Object.assign(d, newDrop(d.col, 0.6));
     }
-  }
-
-  function present() {
-    sctx.drawImage(buf, 0, 0);
-    sctx.fillStyle = vig;
-    sctx.fillRect(0, 0, W, H);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, W, H);
   }
 
   if (params.has('render')) {
     // Fixed-size capture mode (default: iPhone 17 Pro Max, 1320×2868).
     const w = Number(params.get('w')) || 1320, h = Number(params.get('h')) || 2868;
-    screen.style.width = w + 'px';
-    screen.style.height = h + 'px';
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    window.LOOP_FRAMES = LOOP;
     window.renderReady = document.fonts.load('40px "IPAGothic"').catch(() => {}).then(() => setup(w, h));
-    window.renderFrame = () => { step(); present(); };
+    window.renderFrame = render;
     return;
   }
 
@@ -128,10 +129,11 @@
   addEventListener('resize', resize);
   resize();
 
-  let acc = 0, prev = performance.now();
+  const start = performance.now();
+  let last = -1;
   requestAnimationFrame(function loop(now) {
-    acc += now - prev; prev = now;
-    if (acc >= 1000 / FPS) { acc %= 1000 / FPS; step(); present(); }
+    const frame = Math.floor((now - start) / 1000 * FPS);
+    if (frame !== last) { render(frame); last = frame; }
     requestAnimationFrame(loop);
   });
 })();
