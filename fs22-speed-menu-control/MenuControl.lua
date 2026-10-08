@@ -13,6 +13,21 @@ function MenuControl:loadMap()
 
 
     ------------------------------------------------
+    -- HUD POSITION / SIZE
+    --
+    -- Screen coords: 0 = left/bottom, 1 = right/top
+    -- hudX = right edge of the menu
+    -- hudY = top edge of the menu (kept below the
+    --        FS22 money / clock / weather box)
+    -- hudScale = 1.0 normal, lower = smaller
+    ------------------------------------------------
+
+    self.hudX = 0.985
+    self.hudY = 0.875
+    self.hudScale = 1.0
+
+
+    ------------------------------------------------
     -- TIME SPEED SETTINGS
     ------------------------------------------------
 
@@ -633,6 +648,7 @@ end
 
 ------------------------------------------------
 -- DRAW HUD
+-- Compact panel in the top right corner
 ------------------------------------------------
 
 function MenuControl:draw()
@@ -652,312 +668,189 @@ function MenuControl:draw()
     end
 
 
-    local centerX = 0.5
-    local baseY = 0.93
-
-
-    setTextAlignment(
-        RenderText.ALIGN_CENTER
-    )
+    local scale = self.hudScale or 1.0
+    local rightX = self.hudX or 0.985
+    local topY = self.hudY or 0.875
 
 
     ------------------------------------------------
-    -- ORANGE DEFAULT
+    -- COLOURS
     ------------------------------------------------
 
-    setTextColor(
-        1,
-        0.5,
-        0,
-        1
-    )
+    local orange = { 1, 0.5, 0, 1 }
+    local green = { 0, 1, 0, 1 }
+    local red = { 1, 0, 0, 1 }
 
 
     ------------------------------------------------
-    -- TITLE
-    -- ORANGE
+    -- TEXT SIZES
     ------------------------------------------------
 
-    setTextBold(true)
+    local titleSize = 0.014 * scale
+    local headerSize = 0.012 * scale
+    local valueSize = 0.012 * scale
+    local hintSize = 0.010 * scale
+    local gap = 0.006 * scale
 
-    renderText(
-        centerX,
-        baseY,
-        0.028,
-        "Speed Menu Control"
-    )
+
+    ------------------------------------------------
+    -- TIME SPEED VALUE + STATUS
+    ------------------------------------------------
+
+    local speedColor = red
+    local speedStatus = "INACTIVE"
+
+    if self.isActive then
+        speedColor = green
+        speedStatus = "ACTIVE"
+    end
+
+
+    ------------------------------------------------
+    -- COTTON VALUE + STATUS
+    ------------------------------------------------
+
+    local cottonColor = red
+    local cottonStatus = "INACTIVE"
+
+    if self.cottonGrowthEnabled then
+        cottonColor = green
+        cottonStatus = "ACTIVE"
+    end
+
+
+    ------------------------------------------------
+    -- MENU LINES (top to bottom)
+    ------------------------------------------------
+
+    local lines = {
+        { text = "Speed Menu Control", size = titleSize, color = orange, bold = true },
+        { gap = gap },
+
+        { text = "TIME SPEED", size = headerSize, color = orange, bold = true },
+        { text = self.speeds[self.speedIndex] .. "x  |  " .. speedStatus, size = valueSize, color = speedColor },
+        { text = "[=] / [-]  Speed up / down", size = hintSize, color = orange },
+        { text = "[Right CTRL]  Toggle time speed", size = hintSize, color = orange },
+        { gap = gap },
+
+        { text = "COTTON GROWTH", size = headerSize, color = orange, bold = true },
+        { text = self:getCottonGrowthMultiplier() .. "x  |  " .. cottonStatus, size = valueSize, color = cottonColor },
+        { text = "[Page Up] / [Page Down]  Growth up / down", size = hintSize, color = orange },
+        { text = "[Left CTRL]  Toggle cotton growth", size = hintSize, color = orange },
+        { gap = gap },
+
+        { text = "[H]  Toggle HUD", size = hintSize, color = orange }
+    }
+
+
+    ------------------------------------------------
+    -- MEASURE PANEL
+    ------------------------------------------------
+
+    local lineSpacing = 1.25
+    local maxWidth = 0
+    local totalHeight = 0
+
+    for _, line in ipairs(lines) do
+
+        if line.gap ~= nil then
+
+            totalHeight = totalHeight + line.gap
+
+        else
+
+            setTextBold(line.bold == true)
+
+            local width =
+                getTextWidth(line.size, line.text)
+
+            if width > maxWidth then
+                maxWidth = width
+            end
+
+            totalHeight =
+                totalHeight + line.size * lineSpacing
+        end
+    end
 
     setTextBold(false)
 
 
     ------------------------------------------------
-    -- TIME SPEED TITLE
-    -- ORANGE
+    -- BACKGROUND
+    -- Semi-transparent black box like FS22's HUD
     ------------------------------------------------
 
-    setTextColor(
-        1,
-        0.5,
+    local padX = 0.006 * scale
+    local padY = 0.006 * scale
+
+    drawFilledRect(
+        rightX - maxWidth - padX,
+        topY - totalHeight - padY,
+        maxWidth + padX * 2,
+        totalHeight + padY * 2,
         0,
-        1
-    )
-
-    renderText(
-        centerX,
-        baseY - 0.040,
-        0.020,
-        "TIME SPEED"
+        0,
+        0,
+        0.6
     )
 
 
     ------------------------------------------------
-    -- TIME SPEED VALUE + STATUS
-    --
-    -- ACTIVE = GREEN
-    -- INACTIVE = RED
+    -- TEXT
+    -- Right aligned to the right edge of the screen
     ------------------------------------------------
 
-    if self.isActive then
+    setTextAlignment(
+        RenderText.ALIGN_RIGHT
+    )
 
-        setTextColor(
-            0,
-            1,
-            0,
-            1
-        )
+    local y = topY
 
-    else
+    for _, line in ipairs(lines) do
 
-        setTextColor(
-            1,
-            0,
-            0,
-            1
-        )
+        if line.gap ~= nil then
+
+            y = y - line.gap
+
+        else
+
+            y = y - line.size * lineSpacing
+
+            setTextColor(
+                line.color[1],
+                line.color[2],
+                line.color[3],
+                line.color[4]
+            )
+
+            setTextBold(line.bold == true)
+
+            renderText(
+                rightX,
+                y + line.size * 0.2,
+                line.size,
+                line.text
+            )
+        end
     end
 
 
     ------------------------------------------------
-    -- CURRENT TIME SPEED
+    -- RESET TEXT SETTINGS
+    -- So other HUD text is not affected
     ------------------------------------------------
 
-    renderText(
-        centerX,
-        baseY - 0.068,
-        0.019,
-        self.speeds[
-            self.speedIndex
-        ] .. "x"
-    )
-
-
-    ------------------------------------------------
-    -- TIME SPEED STATUS
-    ------------------------------------------------
-
-    if self.isActive then
-
-        renderText(
-            centerX,
-            baseY - 0.095,
-            0.018,
-            "Status: ACTIVE"
-        )
-
-    else
-
-        renderText(
-            centerX,
-            baseY - 0.095,
-            0.018,
-            "Status: INACTIVE"
-        )
-    end
-
-
-    ------------------------------------------------
-    -- TIME SPEED CONTROLS
-    -- ORANGE
-    ------------------------------------------------
+    setTextBold(false)
 
     setTextColor(
         1,
-        0.5,
-        0,
-        1
-    )
-
-
-    renderText(
-        centerX,
-        baseY - 0.125,
-        0.017,
-        "[UP] [=] Increase Time Speed"
-    )
-
-
-    renderText(
-        centerX,
-        baseY - 0.152,
-        0.017,
-        "[DOWN] [-] Decrease Time Speed"
-    )
-
-
-    renderText(
-        centerX,
-        baseY - 0.179,
-        0.017,
-        "[LEFT/RIGHT] [Right CTRL] Toggle Time Speed"
-    )
-
-
-    ------------------------------------------------
-    -- COTTON GROWTH TITLE
-    -- ORANGE
-    ------------------------------------------------
-
-    setTextColor(
         1,
-        0.5,
-        0,
-        1
-    )
-
-
-    renderText(
-        centerX,
-        baseY - 0.220,
-        0.020,
-        "COTTON GROWTH"
-    )
-
-
-    ------------------------------------------------
-    -- GET COTTON MULTIPLIER
-    ------------------------------------------------
-
-    local cottonMultiplier =
-        self:getCottonGrowthMultiplier()
-
-
-    ------------------------------------------------
-    -- COTTON VALUE + STATUS
-    --
-    -- ACTIVE = GREEN
-    -- INACTIVE = RED
-    ------------------------------------------------
-
-    if self.cottonGrowthEnabled then
-
-        setTextColor(
-            0,
-            1,
-            0,
-            1
-        )
-
-    else
-
-        setTextColor(
-            1,
-            0,
-            0,
-            1
-        )
-    end
-
-
-    ------------------------------------------------
-    -- CURRENT COTTON SPEED
-    ------------------------------------------------
-
-    renderText(
-        centerX,
-        baseY - 0.248,
-        0.019,
-        cottonMultiplier .. "x"
-    )
-
-
-    ------------------------------------------------
-    -- COTTON STATUS
-    ------------------------------------------------
-
-    if self.cottonGrowthEnabled then
-
-        renderText(
-            centerX,
-            baseY - 0.275,
-            0.018,
-            "Status: ACTIVE"
-        )
-
-    else
-
-        renderText(
-            centerX,
-            baseY - 0.275,
-            0.018,
-            "Status: INACTIVE"
-        )
-    end
-
-
-    ------------------------------------------------
-    -- COTTON CONTROLS
-    -- ORANGE
-    ------------------------------------------------
-
-    setTextColor(
         1,
-        0.5,
-        0,
         1
     )
 
-
-    renderText(
-        centerX,
-        baseY - 0.305,
-        0.017,
-        "[UP] [Page Up] Increase Cotton Growth"
-    )
-
-
-    renderText(
-        centerX,
-        baseY - 0.332,
-        0.017,
-        "[DOWN] [Page Down] Decrease Cotton Growth"
-    )
-
-
-    renderText(
-        centerX,
-        baseY - 0.359,
-        0.017,
-        "[LEFT/RIGHT] [Left Shift] Toggle Cotton Growth"
-    )
-
-
-    ------------------------------------------------
-    -- HUD CONTROL
-    -- ORANGE
-    ------------------------------------------------
-
-    setTextColor(
-        1,
-        0.5,
-        0,
-        1
-    )
-
-
-    renderText(
-        centerX,
-        baseY - 0.400,
-        0.017,
-        "[LEFT/RIGHT] [H] Toggle HUD"
+    setTextAlignment(
+        RenderText.ALIGN_LEFT
     )
 end
